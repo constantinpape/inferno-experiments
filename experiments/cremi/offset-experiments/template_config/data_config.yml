@@ -1,0 +1,135 @@
+# Specify the names of the datasets
+dataset_names:
+  - A
+  - B
+  - C
+
+# Specify how the data needs to be sliced before feeding to the network.
+# We use a 3D sliding window over the dataset to extract patches, which
+# are then fed to the network as batches.
+slicing_config:
+  # Sliding window size
+  window_size:
+    A: [32, 444, 444]
+    B: [32, 444, 444]
+    C: [32, 444, 444]
+  # Sliding window stride
+  stride:
+    A: [1, 222, 222]
+    B: [1, 222, 222]
+    C: [1, 222, 222]
+  # Sliding window downsampling ratio. The actual image size along a
+  # dimension is the window_size divided by the downsampling ratio.
+  # Example:
+  #   window_size = [1, 512, 512], downsampling_ratio = [1, 2, 2] ==>
+  #   slice shape = [1, 256, 256]
+  downsampling_ratio:
+    A: [1, 1, 1]
+    B: [1, 1, 1]
+    C: [1, 1, 1]
+  # Reflect padding on the loaded volume. Follows numpy.pad semantics.
+  padding:
+    A: [[5, 0], [50, 50], [50, 50]]
+    B: [[5, 0], [50, 50], [50, 50]]
+    C: [[5, 0], [50, 50], [50, 50]]
+  # Data slice to iterate over.
+  data_slice:
+    A: '0:65, :, :'
+    B: '0:65, :, :'
+    C: '0:65, :, :'
+    
+defect_augmentation_config:
+    p_missing_slice: 0.03
+    p_low_contrast: 0.03
+    p_deformed_slice: 0.03
+    p_artifact_source: 0.03
+    deformation_mode: 'compress'
+    deformation_strenght: 20
+    artifact_source:
+        min_masking_ratio: .5
+        slicing_config:
+          window_size: [1, 444, 444]
+          stride: [1, 222, 222]
+          downsampling_ratio: [1, 1, 1]
+        volume_config:
+          artifacts:
+            path: '/groups/saalfeld/home/papec/Work/neurodata_hdd/cremi/sample_ABC_padded_20160501.defects.hdf'
+            path_in_h5_dataset: 'defect_sections/raw'
+            dtype: float32
+          alpha_mask:
+            path: '/groups/saalfeld/home/papec/Work/neurodata_hdd/cremi/sample_ABC_padded_20160501.defects.hdf'
+            path_in_h5_dataset: 'defect_sections/mask'
+        master_config:
+          elastic_transform:
+            alpha: 2000.
+            sigma: 50.
+
+# Specify paths to volumes
+volume_config:
+  # Raw data
+  raw:
+    path:
+      A: '/groups/saalfeld/home/papec/Work/neurodata_hdd/cremi/sampleA/raw/sampleA_raw_automatically_realigned.h5'
+      # we only use the replaced black for sample B, because for C (completely defected slices) it seems to be harmful
+      B: '/groups/saalfeld/home/papec/Work/neurodata_hdd/cremi/sampleB/raw/sampleB_raw_automatically_realigned_replaced_black.h5'
+      C: '/groups/saalfeld/home/papec/Work/neurodata_hdd/cremi/sampleC/raw/sampleC_raw_automatically_realigned.h5'
+    # CREMI default is '/volumes/raw'
+    path_in_h5_dataset:
+      A: 'data'
+      B: 'data'
+      C: 'data'
+    ignore_slice_list:
+      #B: [15, 16, 44, 45, 77]
+      #C: [14, 74, 86]
+      # with added padding (5)
+      B: [20, 21, 49, 50, 82]
+      C: [19, 79, 91]
+    # Optionally, we specify training precision
+    dtype: float32
+  # Membranes
+  segmentation:
+    path:
+      A: '/groups/saalfeld/home/papec/Work/neurodata_hdd/cremi/sampleA/gt/sampleA_neurongt_automatically_realignedV2.h5'
+      B: '/groups/saalfeld/home/papec/Work/neurodata_hdd/cremi/sampleB/gt/sampleB_neurongt_automatically_realignedV2.h5'
+      C: '/groups/saalfeld/home/papec/Work/neurodata_hdd/cremi/sampleC/gt/sampleC_neurongt_automatically_realignedV2.h5'
+    # CREMI default is '/volumes/labels/neuron_ids'
+    path_in_h5_dataset:
+      A: 'data'
+      B: 'data'
+      C: 'data'
+    # Specify training precision
+    dtype: float32
+    affinity_offsets: [[-1, 0, 0], [0, -1, 0], [0, 0, -1], 
+                        [0, -9, 0], [0, 0, -9], [0, -9, -9], [0, 9, -9], 
+                        [0, -9, 4], [0, -4, -9], [0, 4, -9], [0, 9, -4], 
+                        [-2, 0, 0], [-2, 0, -9], [-2, -9, 0], [-2, 9, -9], [-2, -9, -9], 
+                        [-3, 0, 0], [0, -27, 0], [0, 0, -27]]
+
+
+# Configuration for the master dataset.
+master_config:
+  # We might need order 0 interpolation if we have segmentation in there somewhere.
+  elastic_transform:
+    alpha: 2000.
+    sigma: 50.
+    order: 0
+  # we crop to get rid of the elastic augment reflection padding
+  # and the invalid affinities (that's why we have additional lower z crop)
+  crop_after_target:
+    crop_left: [5, 50, 50]
+    crop_right: [0, 50, 50]
+  affinities_on_gpu: False
+  random_slides: True
+  shape_after_slide: [424, 424]
+
+
+# Specify configuration for the loader
+loader_config:
+  # Number of processes to use for loading data. Set to (say) 10 if you wish to
+  # use 10 CPU cores, or to 0 if you wish to use the same process for training and
+  # data-loading (generally not recommended).
+  batch_size: 2
+  num_workers: 40
+  drop_last: True
+  pin_memory: True
+  shuffle: True
