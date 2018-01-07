@@ -15,7 +15,7 @@ from inferno.utils.io_utils import yaml2dict
 from inferno.trainers.callbacks.essentials import SaveAtBestValidationScore
 from inferno.io.transform.base import Compose
 
-from neurofire.models import unet
+import neurofire.models as models
 from neurofire.criteria.loss_wrapper import LossWrapper, BalanceAffinities
 from neurofire.criteria.loss_transforms import MaskTransitionToIgnoreLabel, RemoveSegmentationFromTarget
 
@@ -36,6 +36,8 @@ from skunkworks.metrics import ArandErrorFromSegmentationPipeline
 # multicut pipeline
 from skunkworks.postprocessing.pipelines import local_affinity_multicut_from_wsdt2d
 
+# TODO for euclidean and cross-entropy, we need nasims implementations with
+# weight maps / class weighting
 CRITERIA = {"SorensenDice": SorensenDiceLoss,
             "CrossEntropy": CrossEntropyLoss,
             "Euclidean": MSELoss}
@@ -59,12 +61,12 @@ def set_up_training(project_directory,
                                filename='Weights/checkpoint.pytorch').model
     else:
         model_name = config.get('model_name')
-        model = getattr(unet, model_name)(**config.get('model_kwargs'))
+        model = getattr(models, model_name)(**config.get('model_kwargs'))
 
     # TODO
-    logger.info("Using criterion:", criterion)
+    logger.info("Using criterion: %s" % criterion)
 
-    # TODO this should to go somewhere more prominent
+    # TODO this should go somewhere more prominent
     affinity_offsets = data_config['volume_config']['segmentation']['affinity_offsets']
 
     # TODO implement affinities on gpu again ?!
@@ -161,28 +163,26 @@ def training(project_directory,
     trainer.fit()
 
 
-def parse_offsets(offset_file):
-    with open(offset_file, 'r') as f:
-        return json.load(f)
-
-
-def make_train_config(train_config_file, offsets):
+def make_train_config(train_config_file, offsets, gpus):
     template = yaml2dict('./template_config/train_config.yml')
     template['model_kwargs']['out_channels'] = len(offsets)
+    template['devices'] = gpus
     with open(train_config_file, 'w') as f:
         yaml.dump(template, f)
 
 
-def make_data_config(data_config_file, offsets):
+def make_data_config(data_config_file, offsets, n_batches):
     template = yaml2dict('./template_config/data_config.yml')
-    template['volume_config']['affinity_offsets'] = offsets
+    template['volume_config']['segmentation']['affinity_offsets'] = offsets
+    template['loader_config']['batch_size'] = n_batches
+    template['loader_config']['num_workeres'] = 12 * n_batches
     with open(data_config_file, 'w') as f:
         yaml.dump(template, f)
 
 
 def make_validation_config(validation_config_file, offsets):
     template = yaml2dict('./template_config/validation_config.yml')
-    template['volume_config']['affinity_offsets'] = offsets
+    template['volume_config']['segmentation']['affinity_offsets'] = offsets
     with open(validation_config_file, 'w') as f:
         yaml.dump(template, f)
 
@@ -199,13 +199,15 @@ def main():
     parser.add_argument('project_directory', type=str)
     parser.add_argument('criterion', type=str)
     parser.add_argument('balance', type=int)  # TODO use str2bool
-    # TODO proper parser for gpus
-    # parser.add_argument('--gpus', )
+    parser.add_argument('--gpus', nargs='+', default=[1, 2], type=int)
     parser.add_argument('--max_train_iters', type=int, default=int(1e5))
 
     args = parser.parse_args()
 
     project_directory = args.project_directory
+    if not os.path.exists(project_directory):
+        os.mkdir(project_directory)
+
     criterion = args.criterion
     assert criterion in CRITERIA
     balance = args.balance
@@ -216,11 +218,13 @@ def main():
     # to be more flexible later variable
     offsets = get_default_offsets()
 
+    gpus = list(args.gpus)
+
     train_config = os.path.join(project_directory, 'train_config.yml')
-    make_train_config(train_config, offsets)
+    make_train_config(train_config, offsets, gpus)
 
     data_config = os.path.join(project_directory, 'data_config.yml')
-    make_data_config(data_config, offsets)
+    make_data_config(data_config, offsets, len(gpus))
 
     validation_config = os.path.join(project_directory, 'validation_config.yml')
     make_validation_config(validation_config, offsets)
