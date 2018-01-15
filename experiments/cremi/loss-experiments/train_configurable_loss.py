@@ -17,7 +17,7 @@ from inferno.io.transform.base import Compose
 
 import neurofire.models as models
 from neurofire.criteria.loss_wrapper import LossWrapper, BalanceAffinities
-from neurofire.criteria.loss_transforms import MaskTransitionToIgnoreLabel, RemoveSegmentationFromTarget
+from neurofire.criteria.loss_transforms import MaskTransitionToIgnoreLabel, RemoveSegmentationFromTarget, InvertTarget
 
 # Do we implement this in neurofire again ???
 # from skunkworks.datasets.cremi.criteria import Euclidean, AsSegmentationCriterion
@@ -28,6 +28,7 @@ from skunkworks.datasets.cremi.loaders import get_cremi_loaders_realigned
 # TODO generalized sorensen dice and tversky loss
 from inferno.extensions.criteria import SorensenDiceLoss
 # TODO is MSE the correct loss to do the same as Jan does with `Euclidean` ?
+# FIXME wrong cross entropy loss
 from torch.nn.modules.loss import MSELoss, CrossEntropyLoss
 
 # validation
@@ -73,7 +74,8 @@ def set_up_training(project_directory,
     criterion = CRITERIA[criterion]
     loss = LossWrapper(criterion=criterion(),
                        transforms=Compose(MaskTransitionToIgnoreLabel(affinity_offsets),
-                                          RemoveSegmentationFromTarget()),
+                                          RemoveSegmentationFromTarget(),
+                                          InvertTarget()),
                        weight_function=BalanceAffinities(ignore_label=0, offsets=affinity_offsets) if balance else None)
 
     # Build trainer and validation metric
@@ -175,7 +177,7 @@ def make_data_config(data_config_file, offsets, n_batches):
     template = yaml2dict('./template_config/data_config.yml')
     template['volume_config']['segmentation']['affinity_offsets'] = offsets
     template['loader_config']['batch_size'] = n_batches
-    template['loader_config']['num_workeres'] = 12 * n_batches
+    template['loader_config']['num_workers'] = 12 * n_batches
     with open(data_config_file, 'w') as f:
         yaml.dump(template, f)
 
