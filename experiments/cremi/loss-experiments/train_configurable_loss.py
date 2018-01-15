@@ -26,10 +26,8 @@ from skunkworks.datasets.cremi.loaders import get_cremi_loaders_realigned
 
 # Import the different creiterions, we support.
 # TODO generalized sorensen dice and tversky loss
-from inferno.extensions.criteria import SorensenDiceLoss
-# TODO is MSE the correct loss to do the same as Jan does with `Euclidean` ?
-# FIXME wrong cross entropy loss
-from torch.nn.modules.loss import MSELoss, CrossEntropyLoss
+from inferno.extensions.criteria import SorensenDiceLoss, WeightedMSELoss
+from torch.nn.modules.loss import BCELoss
 
 # validation
 from skunkworks.metrics import ArandErrorFromSegmentationPipeline
@@ -40,8 +38,8 @@ from skunkworks.postprocessing.pipelines import local_affinity_multicut_from_wsd
 # TODO for euclidean and cross-entropy, we need nasims implementations with
 # weight maps / class weighting
 CRITERIA = {"SorensenDice": SorensenDiceLoss,
-            "CrossEntropy": CrossEntropyLoss,
-            "Euclidean": MSELoss}
+            "CrossEntropy": BCELoss,
+            "Euclidean": WeightedMSELoss}
 
 logging.basicConfig(format='[+][%(asctime)-15s][%(name)s %(levelname)s]'
                            ' %(message)s',
@@ -221,6 +219,9 @@ def main():
     offsets = get_default_offsets()
 
     gpus = list(args.gpus)
+    # set the proper CUDA_VISIBLE_DEVICES env variables
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpus))
+    gpus = list(range(len(gpus)))
 
     train_config = os.path.join(project_directory, 'train_config.yml')
     make_train_config(train_config, offsets, gpus)
