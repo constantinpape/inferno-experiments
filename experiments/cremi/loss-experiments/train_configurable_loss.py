@@ -26,8 +26,7 @@ from skunkworks.datasets.cremi.loaders import get_cremi_loaders_realigned
 
 # Import the different creiterions, we support.
 # TODO generalized sorensen dice and tversky loss
-from inferno.extensions.criteria import SorensenDiceLoss, WeightedMSELoss
-from torch.nn.modules.loss import BCELoss
+from inferno.extensions.criteria import SorensenDiceLoss, WeightedMSELoss, WeightedBCELoss, TverskyLoss
 
 # validation
 from skunkworks.metrics import ArandErrorFromSegmentationPipeline
@@ -35,11 +34,10 @@ from skunkworks.metrics import ArandErrorFromSegmentationPipeline
 # multicut pipeline
 from skunkworks.postprocessing.pipelines import local_affinity_multicut_from_wsdt2d
 
-# TODO for euclidean and cross-entropy, we need nasims implementations with
-# weight maps / class weighting
 CRITERIA = {"SorensenDice": SorensenDiceLoss,
-            "CrossEntropy": BCELoss,
-            "Euclidean": WeightedMSELoss}
+            "CrossEntropy": WeightedBCELoss,
+            "Euclidean": WeightedMSELoss,
+            "Tversky": TverskyLoss}
 
 logging.basicConfig(format='[+][%(asctime)-15s][%(name)s %(levelname)s]'
                            ' %(message)s',
@@ -231,6 +229,7 @@ def main():
 
     validation_config = os.path.join(project_directory, 'validation_config.yml')
     make_validation_config(validation_config, offsets)
+
 
     # TODO make accessible:
     # - starting training from checkpoint
