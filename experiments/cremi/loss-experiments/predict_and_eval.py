@@ -58,17 +58,20 @@ def predict(project_folder,
 
 
 def evaluate(project_folder, sample):
-    prediction = vigra.readHDF5(os.path.join(project_directory,
-                                             'Predictions',
-                                             'prediction_sample%s_nnaffinities.h5' % sample), 'data')
+    pred_path = os.path.join(project_directory,
+                             'Predictions',
+                             'prediction_sample%s_nnaffinities.h5' % sample)
+    prediction = vigra.readHDF5(pred_path, 'data')
     multicutter = local_affinity_multicut_from_wsdt2d(n_threads=12)
-    mc_seg = multicutter(prediction)
+    mc_seg = multicutter(prediction).astype('int64')
 
     gt_path = '/groups/saalfeld/home/papec/Work/neurodata_hdd/cremi/sample%s/gt/sample%s_neurongt_automatically_realignedV2.h5' % (sample, sample)
     bb = np.s_[85:]
     with h5py.File(gt_path, 'r') as f:
         gt = f['data'][bb].astype('int64')
     assert gt.shape == mc_seg.shape
+    vigra.writeHDF5(mc_seg, pred_path, 'multicut', compression='gzip')
+
     evals = cremi_scores(mc_seg, gt)
 
     eval_file = os.path.join(project_directory, 'evaluation.json')
@@ -94,10 +97,9 @@ if __name__ == '__main__':
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
 
-    # samples = ('A', 'B', 'C')
-    samples = ('A',)
-    # for sample in samples:
-    #     predict(project_directory, sample)
+    samples = ('A', 'B', 'C')
+    for sample in samples:
+        predict(project_directory, sample)
 
     for sample in samples:
         evaluate(project_directory, sample)
