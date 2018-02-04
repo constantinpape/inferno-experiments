@@ -68,7 +68,9 @@ def set_up_training(project_directory,
     smoothness = 0.95
 
     # use multicut pipeline for validation
+    # TODO fix nifty weighting schemes
     metric = ArandErrorFromSegmentationPipeline(local_affinity_multicut_from_wsdt2d(n_threads=10,
+                                                                                    weighting_scheme=None,
                                                                                     time_limit=120),
                                                 is_multiscale=True)
     trainer = Trainer(model)\
