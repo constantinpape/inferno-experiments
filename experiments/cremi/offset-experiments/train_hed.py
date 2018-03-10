@@ -9,14 +9,14 @@ import json
 import vigra
 
 from inferno.trainers.basic import Trainer
-from inferno.trainers.callbacks.logging.tensorboard import TensorboardLogger
+# from inferno.trainers.callbacks.logging.tensorboard import TensorboardLogger
 from inferno.trainers.callbacks.scheduling import AutoLR
 from inferno.utils.io_utils import yaml2dict
 from inferno.trainers.callbacks.essentials import SaveAtBestValidationScore
 from inferno.io.transform.base import Compose
 
 import neurofire.models as models
-from neurofire.criteria.loss_wrapper import LossWrapper
+from neurofire.criteria.loss_wrapper import MultiOutputLossWrapper
 from neurofire.criteria.loss_transforms import MaskTransitionToIgnoreLabel, RemoveSegmentationFromTarget, InvertTarget
 
 # Do we implement this in neurofire again ???
@@ -55,10 +55,10 @@ def set_up_training(project_directory,
         model = getattr(models, model_name)(**config.get('model_kwargs'))
 
     affinity_offsets = data_config['volume_config']['segmentation']['affinity_offsets']
-    loss = LossWrapper(criterion=SorensenDiceLoss(),
-                       transforms=Compose(MaskTransitionToIgnoreLabel(affinity_offsets),
-                                          RemoveSegmentationFromTarget(),
-                                          InvertTarget()))
+    loss = MultiOutputLossWrapper(criterion=SorensenDiceLoss(),
+                                  transforms=Compose(MaskTransitionToIgnoreLabel(affinity_offsets),
+                                                     RemoveSegmentationFromTarget(),
+                                                     InvertTarget()))
 
     # Build trainer and validation metric
     logger.info("Building trainer.")
@@ -85,15 +85,16 @@ def set_up_training(project_directory,
                                   monitor_momentum=smoothness,
                                   consider_improvement_with_respect_to='previous'))
 
-    logger.info("Building logger.")
-    # Build logger
-    tensorboard = TensorboardLogger(log_scalars_every=(1, 'iteration'),
-                                    log_images_every=(100, 'iterations')).observe_states(
-        ['validation_input', 'validation_prediction, validation_target'],
-        observe_while='validating'
-    )
+    # FIXME some issues with conda tf for torch0.3 env
+    # logger.info("Building logger.")
+    # # Build logger
+    # tensorboard = TensorboardLogger(log_scalars_every=(1, 'iteration'),
+    #                                 log_images_every=(100, 'iterations')).observe_states(
+    #     ['validation_input', 'validation_prediction, validation_target'],
+    #     observe_while='validating'
+    # )
 
-    trainer.build_logger(tensorboard, log_directory=os.path.join(project_directory, 'Logs'))
+    # trainer.build_logger(tensorboard, log_directory=os.path.join(project_directory, 'Logs'))
     return trainer
 
 
@@ -108,7 +109,7 @@ def training(project_directory,
              data_configuration_file,
              validation_configuration_file,
              max_training_iters=int(1e5),
-             from_checkpoint=True,
+             from_checkpoint=False,
              load_pretrained_model=False):
 
     assert not (from_checkpoint and load_pretrained_model)
@@ -125,7 +126,7 @@ def training(project_directory,
 
     # load network and training progress from checkpoint
     if from_checkpoint:
-        trainer = load_checkpoint(project_directory)
+        trainer = load_checkpoint()
     else:
         trainer = set_up_training(project_directory,
                                   config,
@@ -148,8 +149,13 @@ def training(project_directory,
     trainer.fit()
 
 
-def make_train_config(train_config_file, offsets, gpus):
-    template = yaml2dict('./template_config/train_config.yml')
+def make_train_config(train_config_file, offsets, gpus, architecture='vanilla'):
+    if architecture == 'vanilla':
+        template = yaml2dict('./template_config/hed_config.yml')
+    elif architecture == 'dense':
+        template = yaml2dict('./template_config/dense_hed_config.yml')
+    elif architecture == 'm2fcn':
+        template = yaml2dict('./template_config/m2fcn_config.yml')
     template['model_kwargs']['out_channels'] = len(offsets)
     template['devices'] = gpus
     with open(train_config_file, 'w') as f:
@@ -157,7 +163,7 @@ def make_train_config(train_config_file, offsets, gpus):
 
 
 def make_data_config(data_config_file, offsets, n_batches):
-    template = yaml2dict('./template_config/data_config.yml')
+    template = yaml2dict('./template_config/data_config_hed.yml')
     template['volume_config']['segmentation']['affinity_offsets'] = offsets
     template['loader_config']['batch_size'] = n_batches
     template['loader_config']['num_workers'] = 12 * n_batches
@@ -166,7 +172,7 @@ def make_data_config(data_config_file, offsets, n_batches):
 
 
 def make_validation_config(validation_config_file, offsets):
-    template = yaml2dict('./template_config/validation_config.yml')
+    template = yaml2dict('./template_config/validation_config_hed.yml')
     template['volume_config']['segmentation']['affinity_offsets'] = offsets
     with open(validation_config_file, 'w') as f:
         yaml.dump(template, f)
@@ -183,8 +189,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('project_directory', type=str)
     parser.add_argument('offset_file', type=str)
+    parser.add_argument('--hed_architecture', type=str, default='vanilla')
     parser.add_argument('--gpus', nargs='+', default=[0, 1], type=int)
     parser.add_argument('--max_train_iters', type=int, default=int(1e5))
+
+    hed_architectures = ('vanilla', 'dense', 'm2fcn')
 
     args = parser.parse_args()
 
@@ -202,8 +211,11 @@ def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpus))
     gpus = list(range(len(gpus)))
 
+    architecture = args.hed_architecture
+    assert architecture in hed_architectures, architecture
+
     train_config = os.path.join(project_directory, 'train_config.yml')
-    make_train_config(train_config, offsets, gpus)
+    make_train_config(train_config, offsets, gpus, architecture)
 
     data_config = os.path.join(project_directory, 'data_config.yml')
     make_data_config(data_config, offsets, len(gpus))
