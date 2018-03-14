@@ -1,0 +1,7 @@
+{
+    augmentation_config: null,
+    blending_config: {dim: 3, ramp_size: [4, 32, 32]},
+    crop_padding: true,
+    gpu: 0,
+    num_workers: 8
+}
