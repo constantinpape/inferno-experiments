@@ -1,0 +1,63 @@
+# Specify how the data needs to be sliced before feeding to the network.
+# We use a 3D sliding window over the dataset to extract patches, which
+# are then fed to the network as batches.
+slicing_config:
+  # Sliding window size
+  window_size: [32, 444, 444]
+  # Sliding window stride
+  stride: [1, 222, 222]
+  # Sliding window downsampling ratio. The actual image size along a
+  # dimension is the window_size divided by the downsampling ratio.
+  # Example:
+  #   window_size = [1, 512, 512], downsampling_ratio = [1, 2, 2] ==>
+  #   slice shape = [1, 256, 256]
+  downsampling_ratio: [1, 1, 1]
+  # Reflect padding on the loaded volume. Follows numpy.pad semantics.
+  padding: [[5, 0], [50, 50], [50, 50]]
+  # Data slice to iterate over.
+  data_slice: '0:65, :, :'
+    
+
+# Specify paths to volumes
+volume_config:
+  # Raw data
+  raw:
+    path: ''
+      # we only use the replaced black for sample B, because for C (completely defected slices) it seems to be harmful
+    path_in_h5_dataset: 'data'
+    # Optionally, we specify training precision
+    dtype: 'float32'
+  # Membranes
+  segmentation:
+    path: ''
+    # CREMI default is '/volumes/labels/neuron_ids'
+    path_in_h5_dataset: 'data'
+    # Specify training precision
+    dtype: float32
+    affinity_config: ''
+
+
+# Configuration for the master dataset.
+master_config:
+  # We might need order 0 interpolation if we have segmentation in there somewhere.
+  elastic_transform:
+    alpha: 2000.
+    sigma: 50.
+    order: 0
+  # we crop to get rid of the elastic augment reflection padding
+  # and the invalid affinities (that's why we have additional lower z crop)
+  crop_after_target:
+    crop_left: [5, 50, 50]
+    crop_right: [0, 50, 50]
+
+
+# Specify configuration for the loader
+loader_config:
+  # Number of processes to use for loading data. Set to (say) 10 if you wish to
+  # use 10 CPU cores, or to 0 if you wish to use the same process for training and
+  # data-loading (generally not recommended).
+  batch_size: 2
+  num_workers: 40
+  drop_last: True
+  pin_memory: True
+  shuffle: True
