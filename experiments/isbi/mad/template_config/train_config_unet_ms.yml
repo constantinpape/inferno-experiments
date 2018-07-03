@@ -1,0 +1,21 @@
+# The model arguments
+model_name: UNet2DMultiscale
+model_kwargs:
+  in_channels: 1
+  out_channels: 6
+  initial_num_fmaps: 12
+  fmap_growth: 5
+  scale_factor: [[3, 3], [3, 3], [3, 3]]
+  final_activation: Sigmoid
+  conv_type_key: 'vanilla'
+
+
+training_optimizer_kwargs:
+  method: Adam
+  lr: 0.0001
+  weight_decay: 0.0005
+  amsgrad: true
+
+devices:
+  - 0
+  - 1

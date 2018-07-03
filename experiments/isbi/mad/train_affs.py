@@ -18,6 +18,7 @@ import neurofire.models as models
 from neurofire.criteria.loss_wrapper import LossWrapper
 from neurofire.criteria.loss_transforms import ApplyAndRemoveMask
 from neurofire.criteria.multi_scale_loss import MultiScaleLoss
+from neurofire.metrics import ArandErrorFromConnectedComponentsOnAffinities
 
 from skunkworks.datasets.isbi2012.loaders import get_isbi_loader
 
@@ -56,8 +57,7 @@ def set_up_training(project_directory,
     smoothness = 0.95
 
     # validate by connected components on affinities
-    # TODO implement
-    metric = ''
+    metric = ArandErrorFromConnectedComponentsOnAffinities()
 
     trainer = Trainer(model)\
         .save_every((1000, 'iterations'), to_directory=os.path.join(project_directory, 'Weights'))\
@@ -136,9 +136,19 @@ def training(project_directory,
     trainer.fit()
 
 
-def make_train_config(train_config_file, offsets, gpus):
-    template = yaml2dict('./template_config/train_config.yml')
-    template['model_kwargs']['out_channels'] = len(offsets)
+def make_train_config(train_config_file, affinity_config, gpus, architecture):
+    if architecture == 'mad':
+        template = './template_config/train_config_mad.yml'
+        n_out = 3
+    else:
+        if 'offsets' in affinity_config:
+            template = './template_config/train_config_unet_lr.yml'
+            n_out = len(affinity_config['offsets'])
+        else:
+            template = './template_config/train_config_unet_ms.yml'
+            n_out = 3
+    template = yaml2dict(template)
+    template['model_kwargs']['out_channels'] = n_out
     template['devices'] = gpus
     with open(train_config_file, 'w') as f:
         yaml.dump(template, f)
@@ -174,7 +184,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('project_directory', type=str)
     parser.add_argument('train_multiscale', type=int, default=1)
-    parser.add_argument('--gpus', nargs='+', default=[0, 1], type=int)
+    parser.add_argument('--architecture', type=str, default='mad')
+    parser.add_argument('--gpus', nargs='+', default=[0], type=int)
     parser.add_argument('--max_train_iters', type=int, default=int(1e5))
 
     args = parser.parse_args()
@@ -193,13 +204,18 @@ def main():
         offsets = get_default_offsets()
         affinity_config['offsets'] = offsets
 
+    architecture = args.architecture
+    assert architecture in ('mad', 'unet')
+    if architecture == 'mad':
+        assert train_multiscale
+
     gpus = list(args.gpus)
     # set the proper CUDA_VISIBLE_DEVICES env variables
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpus))
     gpus = list(range(len(gpus)))
 
     train_config = os.path.join(project_directory, 'train_config.yml')
-    make_train_config(train_config, affinity_config, gpus)
+    make_train_config(train_config, affinity_config, gpus, architecture)
 
     data_config = os.path.join(project_directory, 'data_config.yml')
     make_data_config(data_config, offsets, len(gpus))

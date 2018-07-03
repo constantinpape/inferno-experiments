@@ -15,7 +15,7 @@ slicing_config:
   # Reflect padding on the loaded volume. Follows numpy.pad semantics.
   # padding: [[5, 0], [50, 50], [50, 50]]
   # Data slice to iterate over.
-  data_slice: '0:28, :, :'
+  data_slice: '28:, :, :'
     
 
 # Specify paths to volumes
@@ -30,7 +30,6 @@ volume_config:
     path: '/g/kreshuk/data/isbi_2012_challenge'
     path_in_h5_dataset: 'data'
     dtype: 'float32'
-    affinity_config: ''
 
 
 # Configuration for the master dataset.
