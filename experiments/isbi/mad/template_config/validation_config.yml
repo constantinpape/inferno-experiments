@@ -22,13 +22,15 @@ slicing_config:
 volume_config:
   # Raw data
   raw:
-    path: '/g/kreshuk/data/isbi_2012_challenge'
-    path_in_h5_dataset: 'data'
+    # path: '/g/kreshuk/data/isbi_2012_challenge'
+    path: '/net/hciserver03/storage/cpape/Work/data/isbi_2012_challenge/isbi2012_train_volume.h5'
+    path_in_h5_dataset: 'volumes/raw'
     dtype: 'float32'
   # Membranes
   segmentation:
-    path: '/g/kreshuk/data/isbi_2012_challenge'
-    path_in_h5_dataset: 'data'
+    # path: '/g/kreshuk/data/isbi_2012_challenge'
+    path: '/net/hciserver03/storage/cpape/Work/data/isbi_2012_challenge/isbi2012_train_volume.h5'
+    path_in_h5_dataset: 'volumes/labels/neuron_ids_2d_thin'
     dtype: 'float32'
 
 

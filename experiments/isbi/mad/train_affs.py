@@ -18,7 +18,7 @@ import neurofire.models as models
 from neurofire.criteria.loss_wrapper import LossWrapper
 from neurofire.criteria.loss_transforms import ApplyAndRemoveMask
 from neurofire.criteria.multi_scale_loss import MultiScaleLoss
-from neurofire.metrics import ArandErrorFromConnectedComponentsOnAffinities
+from neurofire.metrics.arand import ArandErrorFromConnectedComponentsOnAffinities
 
 from skunkworks.datasets.isbi2012.loaders import get_isbi_loader
 
@@ -38,7 +38,8 @@ logger = logging.getLogger(__name__)
 def set_up_training(project_directory,
                     config,
                     data_config,
-                    load_pretrained_model):
+                    load_pretrained_model,
+                    n_scales=4):
     # Get model
     if load_pretrained_model:
         model = Trainer().load(from_directory=project_directory,
@@ -50,7 +51,10 @@ def set_up_training(project_directory,
     loss = LossWrapper(criterion=SorensenDiceLoss(),
                        transforms=ApplyAndRemoveMask())
 
-    multiscale_loss = MultiScaleLoss(loss, n_scales=4, loss_weigts=[1., 0.5, 0.25, 0.125])
+    # TODO we don't need the multi-scale loss if we are training lr affinities
+    scale_weights = [1. / 2 ** scale for scale in range(n_scales)]
+    multiscale_loss = MultiScaleLoss(loss, n_scales=n_scales,
+                                     scale_weights=scale_weights)
 
     # Build trainer and validation metric
     logger.info("Building trainer.")
@@ -95,6 +99,7 @@ def training(project_directory,
              train_configuration_file,
              data_configuration_file,
              validation_configuration_file,
+             n_scales,
              max_training_iters=int(1e5),
              from_checkpoint=False,
              load_pretrained_model=False):
@@ -118,7 +123,8 @@ def training(project_directory,
         trainer = set_up_training(project_directory,
                                   config,
                                   data_config,
-                                  load_pretrained_model)
+                                  load_pretrained_model,
+				  n_scales=n_scales)
 
     trainer.set_max_num_iterations(max_training_iters)
 
@@ -177,13 +183,13 @@ def get_default_offsets():
 
 
 def get_default_block_shapes():
-    return [[1, 1], [3, 3], [9, 9], [27, 27]]
+    return [[1, 1], [2, 2], [4, 4], [8, 8], [16, 16]]
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('project_directory', type=str)
-    parser.add_argument('train_multiscale', type=int, default=1)
+    parser.add_argument('--train_multiscale', type=int, default=1)
     parser.add_argument('--architecture', type=str, default='mad')
     parser.add_argument('--gpus', nargs='+', default=[0], type=int)
     parser.add_argument('--max_train_iters', type=int, default=int(1e5))
@@ -194,20 +200,23 @@ def main():
     if not os.path.exists(project_directory):
         os.mkdir(project_directory)
 
-    # check if we train multiscale or long-range affinities
     train_multiscale = bool(args.train_multiscale)
-    affinity_config = {'retain_mask': True, 'ignore_label': None}
-    if train_multiscale:
-        block_shapes = get_default_block_shapes()
-        affinity_config['block_shapes'] = block_shapes
-    else:
-        offsets = get_default_offsets()
-        affinity_config['offsets'] = offsets
-
     architecture = args.architecture
     assert architecture in ('mad', 'unet')
     if architecture == 'mad':
         assert train_multiscale
+        n_scales = 5
+    else:
+        n_scales = 4
+
+    # check if we train multiscale or long-range affinities
+    affinity_config = {'retain_mask': True, 'ignore_label': None}
+    if train_multiscale:
+        block_shapes = get_default_block_shapes()[:n_scales]
+        affinity_config['block_shapes'] = block_shapes
+    else:
+        offsets = get_default_offsets()
+        affinity_config['offsets'] = offsets
 
     gpus = list(args.gpus)
     # set the proper CUDA_VISIBLE_DEVICES env variables
@@ -218,10 +227,10 @@ def main():
     make_train_config(train_config, affinity_config, gpus, architecture)
 
     data_config = os.path.join(project_directory, 'data_config.yml')
-    make_data_config(data_config, offsets, len(gpus))
+    make_data_config(data_config, affinity_config, len(gpus))
 
     validation_config = os.path.join(project_directory, 'validation_config.yml')
-    make_validation_config(validation_config, offsets)
+    make_validation_config(validation_config)
 
     # TODO make accessible:
     # - starting training from checkpoint
@@ -230,7 +239,8 @@ def main():
              train_config,
              data_config,
              validation_config,
-             max_training_iters=args.max_train_iters)
+             max_training_iters=args.max_train_iters,
+             n_scales=n_scales)
 
 
 if __name__ == '__main__':
