@@ -52,9 +52,16 @@ def set_up_training(project_directory,
                        transforms=ApplyAndRemoveMask())
 
     # TODO we don't need the multi-scale loss if we are training lr affinities
-    scale_weights = [1. / 2 ** scale for scale in range(n_scales)]
+    # TODO how to weight scale levels ?
+    # if n_scales == 6:
+    #     # 
+    #     scale_weights = [1. / 2 ** scale for scale in range(n_scales - 1)]
+    # else:
+    #     scale_weights = [1. / 2 ** scale for scale in range(n_scales)]
+    scale_weights = [1.] * n_scales
     multiscale_loss = MultiScaleLoss(loss, n_scales=n_scales,
-                                     scale_weights=scale_weights)
+                                     scale_weights=scale_weights,
+				     fill_missing_targets=True)
 
     # Build trainer and validation metric
     logger.info("Building trainer.")
@@ -145,14 +152,14 @@ def training(project_directory,
 def make_train_config(train_config_file, affinity_config, gpus, architecture):
     if architecture == 'mad':
         template = './template_config/train_config_mad.yml'
-        n_out = 3
+        n_out = 2
     else:
         if 'offsets' in affinity_config:
             template = './template_config/train_config_unet_lr.yml'
             n_out = len(affinity_config['offsets'])
         else:
             template = './template_config/train_config_unet_ms.yml'
-            n_out = 3
+            n_out = 2
     template = yaml2dict(template)
     template['model_kwargs']['out_channels'] = n_out
     template['devices'] = gpus
@@ -205,7 +212,7 @@ def main():
     assert architecture in ('mad', 'unet')
     if architecture == 'mad':
         assert train_multiscale
-        n_scales = 5
+        n_scales = 6
     else:
         n_scales = 4
 
