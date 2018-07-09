@@ -12,11 +12,11 @@ from inferno.trainers.callbacks.logging.tensorboard import TensorboardLogger
 from inferno.trainers.callbacks.scheduling import AutoLR
 from inferno.utils.io_utils import yaml2dict
 from inferno.trainers.callbacks.essentials import SaveAtBestValidationScore
-# from inferno.io.transform.base import Compose
+from inferno.io.transform.base import Compose
 
 import neurofire.models as models
 from neurofire.criteria.loss_wrapper import LossWrapper
-from neurofire.criteria.loss_transforms import ApplyAndRemoveMask
+from neurofire.criteria.loss_transforms import ApplyAndRemoveMask, RemoveSegmentationFromTarget
 from neurofire.criteria.multi_scale_loss import MultiScaleLoss
 from neurofire.metrics.arand import ArandErrorFromConnectedComponentsOnAffinities
 
@@ -48,20 +48,29 @@ def set_up_training(project_directory,
         model_name = config.get('model_name')
         model = getattr(models, model_name)(**config.get('model_kwargs'))
 
-    loss = LossWrapper(criterion=SorensenDiceLoss(),
-                       transforms=ApplyAndRemoveMask())
+    loss_train_ = LossWrapper(criterion=SorensenDiceLoss(),
+                              transforms=ApplyAndRemoveMask())
+    loss_val_ = LossWrapper(criterion=SorensenDiceLoss(),
+                            transforms=Compose(RemoveSegmentationFromTarget(), ApplyAndRemoveMask()))
 
-    # TODO we don't need the multi-scale loss if we are training lr affinities
-    # TODO how to weight scale levels ?
-    # if n_scales == 6:
-    #     # 
-    #     scale_weights = [1. / 2 ** scale for scale in range(n_scales - 1)]
-    # else:
-    #     scale_weights = [1. / 2 ** scale for scale in range(n_scales)]
-    scale_weights = [1.] * n_scales
-    multiscale_loss = MultiScaleLoss(loss, n_scales=n_scales,
-                                     scale_weights=scale_weights,
-				     fill_missing_targets=True)
+    if n_scales > 1:
+        # TODO we don't need the multi-scale loss if we are training lr affinities
+        # TODO how to weight scale levels ?
+        # if n_scales == 6:
+        #     #
+        #     scale_weights = [1. / 2 ** scale for scale in range(n_scales - 1)]
+        # else:
+        #     scale_weights = [1. / 2 ** scale for scale in range(n_scales)]
+        scale_weights = [1.] * n_scales
+        loss_train = MultiScaleLoss(loss_train_, n_scales=n_scales,
+                                    scale_weights=scale_weights,
+                                    fill_missing_targets=True)
+        loss_val = MultiScaleLoss(loss_val_, n_scales=n_scales,
+                                  scale_weights=scale_weights,
+                                  fill_missing_targets=True)
+    else:
+        loss_train = loss_train_
+        loss_val = loss_val_
 
     # Build trainer and validation metric
     logger.info("Building trainer.")
@@ -70,9 +79,11 @@ def set_up_training(project_directory,
     # validate by connected components on affinities
     metric = ArandErrorFromConnectedComponentsOnAffinities()
 
+    # TODO set validation loss
     trainer = Trainer(model)\
         .save_every((1000, 'iterations'), to_directory=os.path.join(project_directory, 'Weights'))\
-        .build_criterion(multiscale_loss)\
+        .build_criterion(loss_train)\
+        .build_validation_criterion(loss_val)\
         .build_optimizer(**config.get('training_optimizer_kwargs'))\
         .evaluate_metric_every('never')\
         .validate_every((100, 'iterations'), for_num_iterations=1)\
@@ -131,7 +142,7 @@ def training(project_directory,
                                   config,
                                   data_config,
                                   load_pretrained_model,
-				  n_scales=n_scales)
+                                   n_scales=n_scales)
 
     trainer.set_max_num_iterations(max_training_iters)
 
@@ -176,8 +187,10 @@ def make_data_config(data_config_file, affinity_config, n_batches):
         yaml.dump(template, f)
 
 
-def make_validation_config(validation_config_file):
+def make_validation_config(validation_config_file, affinity_config):
     template = yaml2dict('./template_config/validation_config.yml')
+    affinity_config.update({'retain_segmentation': True})
+    template['volume_config']['segmentation']['affinity_config'] = affinity_config
     with open(validation_config_file, 'w') as f:
         yaml.dump(template, f)
 
@@ -224,6 +237,7 @@ def main():
     else:
         offsets = get_default_offsets()
         affinity_config['offsets'] = offsets
+        n_scales = 1
 
     gpus = list(args.gpus)
     # set the proper CUDA_VISIBLE_DEVICES env variables
@@ -237,7 +251,7 @@ def main():
     make_data_config(data_config, affinity_config, len(gpus))
 
     validation_config = os.path.join(project_directory, 'validation_config.yml')
-    make_validation_config(validation_config)
+    make_validation_config(validation_config, affinity_config)
 
     # TODO make accessible:
     # - starting training from checkpoint
