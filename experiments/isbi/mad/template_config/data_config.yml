@@ -15,7 +15,7 @@ slicing_config:
   # Reflect padding on the loaded volume. Follows numpy.pad semantics.
   # padding: [[5, 0], [50, 50], [50, 50]]
   # Data slice to iterate over.
-  data_slice: '0:28, :, :'
+  data_slice: ':, :, :'
     
 
 # Specify paths to volumes
@@ -23,14 +23,16 @@ volume_config:
   # Raw data
   raw:
     # path: '/g/kreshuk/data/isbi_2012_challenge'
-    path: '/net/hciserver03/storage/cpape/Work/data/isbi_2012_challenge/isbi2012_train_volume.h5'
+    # path: '/net/hciserver03/storage/cpape/Work/data/isbi_2012_challenge/isbi2012_train_volume.h5'
+    path: '/home/constantin/Work/neurodata_hdd/isbi12_data/isbi2012_train_volume.h5'
     path_in_h5_dataset: 'volumes/raw'
     dtype: 'float32'
   # Membranes
   segmentation:
     # path: '/g/kreshuk/data/isbi_2012_challenge'
-    path: '/net/hciserver03/storage/cpape/Work/data/isbi_2012_challenge/isbi2012_train_volume.h5'
-    path_in_h5_dataset: 'volumes/labels/neuron_ids_2d_thin'
+    # path: '/net/hciserver03/storage/cpape/Work/data/isbi_2012_challenge/isbi2012_train_volume.h5'
+    path: '/home/constantin/Work/neurodata_hdd/isbi12_data/isbi2012_train_volume.h5'
+    path_in_h5_dataset: 'volumes/labels/neuron_ids_3d'
     dtype: 'float32'
     affinity_config: ''
 

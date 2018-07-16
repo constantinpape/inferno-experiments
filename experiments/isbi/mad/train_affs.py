@@ -16,14 +16,18 @@ from inferno.io.transform.base import Compose
 
 import neurofire.models as models
 from neurofire.criteria.loss_wrapper import LossWrapper
-from neurofire.criteria.loss_transforms import ApplyAndRemoveMask, RemoveSegmentationFromTarget
+from neurofire.criteria.loss_transforms import ApplyAndRemoveMask, RemoveSegmentationFromTarget, InvertTarget
+from neurofire.criteria.loss_transforms import InvertPrediction
 from neurofire.criteria.multi_scale_loss import MultiScaleLoss
+from neurofire.criteria.malis import MalisLoss
 from neurofire.metrics.arand import ArandErrorFromConnectedComponentsOnAffinities
 
 from skunkworks.datasets.isbi2012.loaders import get_isbi_loader
 
 # TODO try different loss functions ?!
 from inferno.extensions.criteria import SorensenDiceLoss
+
+from inferno.trainers.callbacks.essentials import DumpHDF5Every
 
 # validate by connected components on affinities
 
@@ -39,7 +43,8 @@ def set_up_training(project_directory,
                     config,
                     data_config,
                     load_pretrained_model,
-                    n_scales=4):
+                    n_scales=4,
+                    loss_str='dice'):
     # Get model
     if load_pretrained_model:
         model = Trainer().load(from_directory=project_directory,
@@ -48,10 +53,14 @@ def set_up_training(project_directory,
         model_name = config.get('model_name')
         model = getattr(models, model_name)(**config.get('model_kwargs'))
 
-    loss_train_ = LossWrapper(criterion=SorensenDiceLoss(),
-                              transforms=ApplyAndRemoveMask())
-    loss_val_ = LossWrapper(criterion=SorensenDiceLoss(),
-                            transforms=Compose(RemoveSegmentationFromTarget(), ApplyAndRemoveMask()))
+    criterion = SorensenDiceLoss() if loss_str == 'dice' else MalisLoss(ndim=2)
+    loss_train_ = LossWrapper(criterion=criterion,
+                              transforms=Compose(ApplyAndRemoveMask(), InvertTarget()) if loss_str != 'malis' else
+                              InvertPrediction())
+    loss_val_ = LossWrapper(criterion=criterion,
+                            transforms=Compose(RemoveSegmentationFromTarget(),
+                                               ApplyAndRemoveMask(), InvertTarget()) if loss_str != 'malis' else
+                            InvertPrediction())
 
     if n_scales > 1:
         # TODO we don't need the multi-scale loss if we are training lr affinities
@@ -77,9 +86,10 @@ def set_up_training(project_directory,
     smoothness = 0.95
 
     # validate by connected components on affinities
-    metric = ArandErrorFromConnectedComponentsOnAffinities()
+    metric = ArandErrorFromConnectedComponentsOnAffinities(thresholds=[.5, .6, .7, .8, .9],
+                                                           invert_affinities=True)
 
-    # TODO set validation loss
+    # TODO dump during validation ?!
     trainer = Trainer(model)\
         .save_every((1000, 'iterations'), to_directory=os.path.join(project_directory, 'Weights'))\
         .build_criterion(loss_train)\
@@ -88,12 +98,17 @@ def set_up_training(project_directory,
         .evaluate_metric_every('never')\
         .validate_every((100, 'iterations'), for_num_iterations=1)\
         .register_callback(SaveAtBestValidationScore(smoothness=smoothness, verbose=True))\
+        .register_callback(DumpHDF5Every(frequency='99 iterations',
+                                         to_directory=os.path.join(project_directory, 'debug')))\
         .build_metric(metric)\
         .register_callback(AutoLR(factor=0.98,
                                   patience='100 iterations',
                                   monitor_while='validating',
                                   monitor_momentum=smoothness,
                                   consider_improvement_with_respect_to='previous'))
+
+    if loss_str == 'malis':
+        trainer.retain_graph = True
 
     logger.info("Building logger.")
     # Build logger
@@ -120,7 +135,8 @@ def training(project_directory,
              n_scales,
              max_training_iters=int(1e5),
              from_checkpoint=False,
-             load_pretrained_model=False):
+             load_pretrained_model=False,
+             loss_str='dice'):
 
     assert not (from_checkpoint and load_pretrained_model)
 
@@ -142,7 +158,8 @@ def training(project_directory,
                                   config,
                                   data_config,
                                   load_pretrained_model,
-                                   n_scales=n_scales)
+                                  n_scales=n_scales,
+                                  loss_str=loss_str)
 
     trainer.set_max_num_iterations(max_training_iters)
 
@@ -189,7 +206,8 @@ def make_data_config(data_config_file, affinity_config, n_batches):
 
 def make_validation_config(validation_config_file, affinity_config):
     template = yaml2dict('./template_config/validation_config.yml')
-    affinity_config.update({'retain_segmentation': True})
+    if affinity_config is not None:
+        affinity_config.update({'retain_segmentation': True})
     template['volume_config']['segmentation']['affinity_config'] = affinity_config
     with open(validation_config_file, 'w') as f:
         yaml.dump(template, f)
@@ -200,6 +218,10 @@ def get_default_offsets():
             [-3, 0], [0, -3],
             [-9, 0], [0, -9],
             [-27, 0], [0, -27]]
+
+
+def get_nn_offsets():
+    return [[-1, 0], [0, -1]]
 
 
 def get_default_block_shapes():
@@ -213,6 +235,9 @@ def main():
     parser.add_argument('--architecture', type=str, default='mad')
     parser.add_argument('--gpus', nargs='+', default=[0], type=int)
     parser.add_argument('--max_train_iters', type=int, default=int(1e5))
+    parser.add_argument('--loss', type=str, default='dice')
+    parser.add_argument('--from_checkpoint', type=int, default=0)
+    parser.add_argument('--load_network', type=int, default=0)
 
     args = parser.parse_args()
 
@@ -229,15 +254,21 @@ def main():
     else:
         n_scales = 4
 
+    loss = args.loss
+    assert loss in ('malis', 'dice', 'malis-pretrain')
+
     # check if we train multiscale or long-range affinities
     affinity_config = {'retain_mask': True, 'ignore_label': None}
     if train_multiscale:
         block_shapes = get_default_block_shapes()[:n_scales]
         affinity_config['block_shapes'] = block_shapes
     else:
-        offsets = get_default_offsets()
+        offsets = get_default_offsets() if loss == 'dice' else get_nn_offsets()
         affinity_config['offsets'] = offsets
         n_scales = 1
+
+    if loss == 'malis-pretrain':
+        loss = 'dice'
 
     gpus = list(args.gpus)
     # set the proper CUDA_VISIBLE_DEVICES env variables
@@ -247,6 +278,8 @@ def main():
     train_config = os.path.join(project_directory, 'train_config.yml')
     make_train_config(train_config, affinity_config, gpus, architecture)
 
+    if loss == 'malis':
+        affinity_config = None
     data_config = os.path.join(project_directory, 'data_config.yml')
     make_data_config(data_config, affinity_config, len(gpus))
 
@@ -254,14 +287,16 @@ def main():
     make_validation_config(validation_config, affinity_config)
 
     # TODO make accessible:
-    # - starting training from checkpoint
     # - loading pretrained model
     training(project_directory,
              train_config,
              data_config,
              validation_config,
              max_training_iters=args.max_train_iters,
-             n_scales=n_scales)
+             n_scales=n_scales,
+             from_checkpoint=bool(args.from_checkpoint),
+             load_pretrained_model=bool(args.load_network),
+             loss_str=loss)
 
 
 if __name__ == '__main__':
