@@ -1,4 +1,5 @@
 import os
+import json
 import argparse
 import h5py
 from concurrent import futures
@@ -85,16 +86,27 @@ def evaluate(prediction, algo='cc'):
     return scores
 
 
+def main(project_dir, out_file, inference_config, key):
+    out = run_inference(project_dir, out_file, inference_config)
+    score = evaluate(out)
+    if os.path.exists('results.json'):
+        with open('results.json') as f:
+            results = json.load(f)
+    else:
+        results = {}
+    results[key] = {'cremi-score': score[0],
+                    'vi-split': score[1],
+                    'vi-merge': score[2],
+                    'rand': score[3]}
+    with open('results.json', 'w') as f:
+        json.dump(results, f, sort_keys=True, indent=4)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('project_directory', type=str)
-    parser.add_argument('out_file', type=str)
+    parser.add_argument('result_key', type=str)
+    parser.add_argument('--out_file', type=str, default='')
     parser.add_argument('--inference_config', type=str, default='template_config/inf_config.yml')
     args = parser.parse_args()
-
-    out = run_inference(args.project_directory, args.out_file, args.inference_config)
-    # with h5py.File('pred.h5') as f:
-    #    out = f['data'][:]
-    score = evaluate(out)
-    # TODO serialize the score properly
-    print(scores[0], scores[1], scores[2], scores[3])
+    main(args.project_directory, args.out_file, args.inference_config, args.result_key)
