@@ -17,7 +17,7 @@ from inferno.io.transform.base import Compose
 import neurofire.models as models
 from neurofire.criteria.loss_wrapper import LossWrapper
 from neurofire.criteria.loss_transforms import ApplyAndRemoveMask, RemoveSegmentationFromTarget, InvertTarget
-from neurofire.criteria.loss_transforms import InvertPrediction
+from neurofire.criteria.loss_transforms import InvertPrediction, RemoveIgnoreLabel
 from neurofire.criteria.multi_scale_loss import MultiScaleLoss
 from neurofire.criteria.malis import MalisLoss
 from neurofire.metrics.arand import ArandErrorFromConnectedComponentsOnAffinities
@@ -56,7 +56,7 @@ def set_up_training(project_directory,
     criterion = SorensenDiceLoss() if loss_str == 'dice' else MalisLoss(ndim=2)
     loss_train_ = LossWrapper(criterion=criterion,
                               transforms=Compose(ApplyAndRemoveMask(), InvertTarget()) if loss_str != 'malis' else
-                              InvertPrediction())
+                              Compose(InvertPrediction(), RemoveIgnoreLabel()))
     loss_val_ = LossWrapper(criterion=criterion,
                             transforms=Compose(RemoveSegmentationFromTarget(),
                                                ApplyAndRemoveMask(), InvertTarget()) if loss_str != 'malis' else
@@ -220,6 +220,14 @@ def get_default_offsets():
             [-27, 0], [0, -27]]
 
 
+def get_mws_offsets():
+    return [[-1, 0], [0, -1],
+            [-9, 0], [0, -9],
+            [-9, -9], [9, -9], [-9, -4],
+            [-4, -9], [4, -9], [9, -4],
+            [-27, 0], [0, -27]]
+
+
 def get_nn_offsets():
     return [[-1, 0], [0, -1]]
 
@@ -262,8 +270,11 @@ def main():
     if train_multiscale:
         block_shapes = get_default_block_shapes()[:n_scales]
         affinity_config['block_shapes'] = block_shapes
+        # uncomment this to train multi-scale u-net with lr affinities on original scale
+        affinity_config['original_scale_offsets'] = get_mws_offsets()
     else:
-        offsets = get_default_offsets() if loss == 'dice' else get_nn_offsets()
+        # offsets = get_default_offsets() if loss == 'dice' else get_nn_offsets()
+        offsets = get_mws_offsets() if loss == 'dice' else get_nn_offsets()
         affinity_config['offsets'] = offsets
         n_scales = 1
 
