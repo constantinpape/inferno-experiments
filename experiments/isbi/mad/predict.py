@@ -1,3 +1,5 @@
+#! /g/kreshuk/pape/Work/software/conda/miniconda3/envs/inferno/bin/python
+
 import os
 import json
 import argparse
@@ -47,6 +49,30 @@ def cc_segmenter(prediction, thresholds=[.9, .925, .95, .975, .99], invert=True)
             for thresh in thresholds]
 
 
+def zws_segmenter(prediction, thresholds=[0.5], invert=True):
+    from affogato.segmentation import compute_zws_segmentation
+    if invert:
+        prediction = 1. - prediction
+    # parameters that are not exposed
+    lower_thresh = 0.2
+    higher_thresh = 0.98
+    size_thresh = 25
+    return [compute_zws_segmentation(prediction, lower_thresh, higher_thresh, thresh, size_thresh)
+            for thresh in thresholds]
+
+
+def mws_segmenter(prediction, offset_version='v2'):
+    from affogato.segmentation import compute_mws_segmentation
+    from train_affs import get_default_offsets, get_mws_offsets
+    assert offset_version in ('v1', 'v2')
+    offsets = get_default_offsets() if offset_version == 'v1' else get_mws_offsets()
+    # invert the lr channels
+    prediction[:2] *= -1
+    prediction[:2] += 1
+    # TODO change this api
+    return compute_mws_segmentation(prediction, offsets, 2, strides=[4, 4])
+
+
 def cremi_score(seg, gt):
     assert seg.shape == gt.shape
     rand = 1. - adapted_rand(seg, gt)[0]
@@ -59,8 +85,13 @@ def evaluate(prediction, algo='cc'):
     # get the segmentation algorithm
     if algo == 'cc':
         segmenter = cc_segmenter
+    elif algo == 'mws':
+        # TODO expose offset version somehow
+        segmenter = mws_segmenter
+    elif algo == 'zws':
+        segmenter = zws_segemnter
     else:
-        raise NotImplementedError()
+        raise NotImplementedError('Algorithm %s not implemented' % algo)
 
     gt_path = '/g/kreshuk/data/isbi2012_challenge/vnc_train_volume.h5'
     with h5py.File(gt_path) as f:
@@ -86,12 +117,18 @@ def evaluate(prediction, algo='cc'):
     return scores
 
 
-def main(project_dir, out_file, inference_config, key):
+def main(project_dir, out_file, inference_config, key, algorithm='cc'):
     out = run_inference(project_dir, out_file, inference_config)
-    score = evaluate(out)
+    if algorithm == 'no':
+        return
+    score = evaluate(out, algorithm)
+    if algorithm != 'cc':
+        key += '_' + algorithm
     if os.path.exists('results.json'):
         with open('results.json') as f:
             results = json.load(f)
+        if key in results:
+            raise RuntimeError("Key %s is already in results, will not override !" % key)
     else:
         results = {}
     results[key] = {'cremi-score': score[0],
@@ -108,5 +145,6 @@ if __name__ == '__main__':
     parser.add_argument('result_key', type=str)
     parser.add_argument('--out_file', type=str, default='')
     parser.add_argument('--inference_config', type=str, default='template_config/inf_config.yml')
+    parser.add_argument('--algorithm', type=str, default='cc')
     args = parser.parse_args()
-    main(args.project_directory, args.out_file, args.inference_config, args.result_key)
+    main(args.project_directory, args.out_file, args.inference_config, args.result_key, args.algorithm)
