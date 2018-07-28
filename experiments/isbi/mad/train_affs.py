@@ -1,3 +1,5 @@
+#! /g/kreshuk/pape/Work/software/conda/miniconda3/envs/inferno/bin/python
+
 import os
 import sys
 import logging
@@ -178,16 +180,19 @@ def training(project_directory,
 
 
 def make_train_config(train_config_file, affinity_config, gpus, architecture):
-    if architecture == 'mad':
-        template = './template_config/train_config_mad.yml'
+    if architecture == 'hed':
+        template = './template_config/train_config_hed.yml'
         n_out = 2
-    else:
+    elif architecture == 'unet':
         if 'offsets' in affinity_config:
             template = './template_config/train_config_unet_lr.yml'
             n_out = len(affinity_config['offsets'])
         else:
             template = './template_config/train_config_unet_ms.yml'
             n_out = 2
+    elif architecture == 'wnet':
+        template = './template_config/train_config_wnet_lr.yml'
+        n_out = len(affinity_config['offsets'])
     template = yaml2dict(template)
     template['model_kwargs']['out_channels'] = n_out
     template['devices'] = gpus
@@ -255,8 +260,8 @@ def main():
 
     train_multiscale = bool(args.train_multiscale)
     architecture = args.architecture
-    assert architecture in ('mad', 'unet')
-    if architecture == 'mad':
+    assert architecture in ('mad', 'unet', 'wnet', 'hed')
+    if architecture in ('mad', 'hed'):
         assert train_multiscale
         n_scales = 6
     else:
@@ -271,10 +276,10 @@ def main():
         block_shapes = get_default_block_shapes()[:n_scales]
         affinity_config['block_shapes'] = block_shapes
         # uncomment this to train multi-scale u-net with lr affinities on original scale
-        affinity_config['original_scale_offsets'] = get_mws_offsets()
+        # affinity_config['original_scale_offsets'] = get_mws_offsets()
     else:
-        # offsets = get_default_offsets() if loss == 'dice' else get_nn_offsets()
-        offsets = get_mws_offsets() if loss == 'dice' else get_nn_offsets()
+        offsets = get_default_offsets() if loss == 'dice' else get_nn_offsets()
+        # offsets = get_mws_offsets() if loss == 'dice' else get_nn_offsets()
         affinity_config['offsets'] = offsets
         n_scales = 1
 
