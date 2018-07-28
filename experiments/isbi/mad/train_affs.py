@@ -100,14 +100,14 @@ def set_up_training(project_directory,
         .evaluate_metric_every('never')\
         .validate_every((100, 'iterations'), for_num_iterations=1)\
         .register_callback(SaveAtBestValidationScore(smoothness=smoothness, verbose=True))\
-        .register_callback(DumpHDF5Every(frequency='99 iterations',
-                                         to_directory=os.path.join(project_directory, 'debug')))\
         .build_metric(metric)\
         .register_callback(AutoLR(factor=0.98,
                                   patience='100 iterations',
                                   monitor_while='validating',
                                   monitor_momentum=smoothness,
                                   consider_improvement_with_respect_to='previous'))
+        # .register_callback(DumpHDF5Every(frequency='99 iterations',
+        #                                  to_directory=os.path.join(project_directory, 'debug')))\
 
     if loss_str == 'malis':
         trainer.retain_graph = True
@@ -180,19 +180,27 @@ def training(project_directory,
 
 
 def make_train_config(train_config_file, affinity_config, gpus, architecture):
+    # configuration for hed
     if architecture == 'hed':
         template = './template_config/train_config_hed.yml'
         n_out = 2
+    # configuration for unet
     elif architecture == 'unet':
         if 'offsets' in affinity_config:
             template = './template_config/train_config_unet_lr.yml'
             n_out = len(affinity_config['offsets'])
         else:
             template = './template_config/train_config_unet_ms.yml'
-            n_out = 2
+            if 'original_scale_offsets' in affinity_config:
+                n_out = len(affinity_config.get('original_scale_offsets', [0, 0]))
+                n_out = [n_out] + [2] * 3
+            else:
+                n_out = 2
+    # configuration for wnet
     elif architecture == 'wnet':
         template = './template_config/train_config_wnet_lr.yml'
         n_out = len(affinity_config['offsets'])
+
     template = yaml2dict(template)
     template['model_kwargs']['out_channels'] = n_out
     template['devices'] = gpus
@@ -277,6 +285,7 @@ def main():
         affinity_config['block_shapes'] = block_shapes
         # uncomment this to train multi-scale u-net with lr affinities on original scale
         # affinity_config['original_scale_offsets'] = get_mws_offsets()
+        # affinity_config['original_scale_offsets'] = get_default_offsets()
     else:
         offsets = get_default_offsets() if loss == 'dice' else get_nn_offsets()
         # offsets = get_mws_offsets() if loss == 'dice' else get_nn_offsets()
