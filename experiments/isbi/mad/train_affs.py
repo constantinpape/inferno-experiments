@@ -6,9 +6,6 @@ import logging
 import argparse
 import yaml
 
-# FIXME needed to prevent segfault at import ?!
-# import vigra
-
 from inferno.trainers.basic import Trainer
 from inferno.trainers.callbacks.logging.tensorboard import TensorboardLogger
 from inferno.trainers.callbacks.scheduling import AutoLR
@@ -19,17 +16,16 @@ from inferno.io.transform.base import Compose
 import neurofire.models as models
 from neurofire.criteria.loss_wrapper import LossWrapper
 from neurofire.criteria.loss_transforms import ApplyAndRemoveMask, RemoveSegmentationFromTarget, InvertTarget
-from neurofire.criteria.loss_transforms import InvertPrediction, RemoveIgnoreLabel
+from neurofire.criteria.loss_transforms import InvertPrediction, RemoveIgnoreLabel, AddNoise
 from neurofire.criteria.multi_scale_loss import MultiScaleLoss
 from neurofire.criteria.malis import MalisLoss
+from neurofire.criteria.mutex_malis import MutexMalisLoss
 from neurofire.metrics.arand import ArandErrorFromConnectedComponentsOnAffinities
 
 from skunkworks.datasets.isbi2012.loaders import get_isbi_loader
 
-# TODO try different loss functions ?!
 from inferno.extensions.criteria import SorensenDiceLoss
-
-from inferno.trainers.callbacks.essentials import DumpHDF5Every
+# from inferno.trainers.callbacks.essentials import DumpHDF5Every
 
 # validate by connected components on affinities
 
@@ -46,7 +42,8 @@ def set_up_training(project_directory,
                     data_config,
                     load_pretrained_model,
                     n_scales=4,
-                    loss_str='dice'):
+                    loss_str='dice',
+                    offsets=None):
     # Get model
     if load_pretrained_model:
         model = Trainer().load(from_directory=project_directory,
@@ -56,12 +53,24 @@ def set_up_training(project_directory,
         model = getattr(models, model_name)(**config.get('model_kwargs'))
 
     criterion = SorensenDiceLoss() if loss_str == 'dice' else MalisLoss(ndim=2)
+    if loss_str == 'mutex-malis':
+        assert offsets is not None
+        criterion = MutexMalisLoss(offsets=offsets, number_of_attractive_channels=2)
+
+    if loss_str == 'malis':
+        train_trafos = Compose(InvertPrediction(), RemoveIgnoreLabel())
+    elif loss_str == 'mutex-malis':
+        train_trafos = Compose(InvertPrediction(), RemoveIgnoreLabel(),
+                               AddNoise(apply_='prediction', noise_type='uniform',
+                                        min=-0.1, max=0.1))
+    else:
+        train_trafos = Compose(ApplyAndRemoveMask(), InvertTarget())
     loss_train_ = LossWrapper(criterion=criterion,
-                              transforms=Compose(ApplyAndRemoveMask(), InvertTarget()) if loss_str != 'malis' else
-                              Compose(InvertPrediction(), RemoveIgnoreLabel()))
+                              transforms=train_trafos)
     loss_val_ = LossWrapper(criterion=criterion,
                             transforms=Compose(RemoveSegmentationFromTarget(),
-                                               ApplyAndRemoveMask(), InvertTarget()) if loss_str != 'malis' else
+                                               ApplyAndRemoveMask(), InvertTarget()) if loss_str not in ('malis',
+                                                                                                         'mutex-malis') else
                             InvertPrediction())
 
     if n_scales > 1:
@@ -109,7 +118,7 @@ def set_up_training(project_directory,
         # .register_callback(DumpHDF5Every(frequency='99 iterations',
         #                                  to_directory=os.path.join(project_directory, 'debug')))\
 
-    if loss_str == 'malis':
+    if loss_str in ('malis', 'mutex-malis'):
         trainer.retain_graph = True
 
     logger.info("Building logger.")
@@ -138,7 +147,8 @@ def training(project_directory,
              max_training_iters=int(1e5),
              from_checkpoint=False,
              load_pretrained_model=False,
-             loss_str='dice'):
+             loss_str='dice',
+             offsets=None):
 
     assert not (from_checkpoint and load_pretrained_model)
 
@@ -161,7 +171,8 @@ def training(project_directory,
                                   data_config,
                                   load_pretrained_model,
                                   n_scales=n_scales,
-                                  loss_str=loss_str)
+                                  loss_str=loss_str,
+                                  offsets=offsets)
 
     trainer.set_max_num_iterations(max_training_iters)
 
@@ -253,7 +264,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('project_directory', type=str)
     parser.add_argument('--train_multiscale', type=int, default=1)
-    parser.add_argument('--architecture', type=str, default='mad')
+    parser.add_argument('--architecture', type=str, default='unet')
     parser.add_argument('--gpus', nargs='+', default=[0], type=int)
     parser.add_argument('--max_train_iters', type=int, default=int(1e5))
     parser.add_argument('--loss', type=str, default='dice')
@@ -276,7 +287,8 @@ def main():
         n_scales = 4
 
     loss = args.loss
-    assert loss in ('malis', 'dice', 'malis-pretrain')
+    assert loss in ('malis', 'dice', 'malis-pretrain', 'mutex-malis',
+                    'mutex-malis-pretrain')
 
     # check if we train multiscale or long-range affinities
     affinity_config = {'retain_mask': True, 'ignore_label': None}
@@ -287,12 +299,14 @@ def main():
         # affinity_config['original_scale_offsets'] = get_mws_offsets()
         # affinity_config['original_scale_offsets'] = get_default_offsets()
     else:
-        offsets = get_default_offsets() if loss == 'dice' else get_nn_offsets()
+        offsets = get_default_offsets() if loss in ('dice', 'mutex-malis-pretrain') else get_nn_offsets()
+        if loss == 'mutex-malis':
+            offsets = get_default_offsets()
         # offsets = get_mws_offsets() if loss == 'dice' else get_nn_offsets()
         affinity_config['offsets'] = offsets
         n_scales = 1
 
-    if loss == 'malis-pretrain':
+    if loss in ('malis-pretrain', 'mutex-malis-pretrain'):
         loss = 'dice'
 
     gpus = list(args.gpus)
@@ -303,7 +317,7 @@ def main():
     train_config = os.path.join(project_directory, 'train_config.yml')
     make_train_config(train_config, affinity_config, gpus, architecture)
 
-    if loss == 'malis':
+    if loss in ('malis', 'mutex-malis'):
         affinity_config = None
     data_config = os.path.join(project_directory, 'data_config.yml')
     make_data_config(data_config, affinity_config, len(gpus))
@@ -321,7 +335,8 @@ def main():
              n_scales=n_scales,
              from_checkpoint=bool(args.from_checkpoint),
              load_pretrained_model=bool(args.load_network),
-             loss_str=loss)
+             loss_str=loss,
+             offsets=offsets)
 
 
 if __name__ == '__main__':

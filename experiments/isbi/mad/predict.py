@@ -117,10 +117,24 @@ def evaluate(prediction, algo='cc'):
     return scores
 
 
-def main(project_dir, out_file, inference_config, key, algorithm='cc'):
+def view_res(prediction):
+    from cremi_tools.viewer.volumina import view
+    raw_path = '/home/constantin/Work/neurodata_hdd/isbi12_data/isbi2012_test_volume.h5'
+    with h5py.File(raw_path, 'r') as f:
+        raw = f['volumes/raw'][:]
+    view([raw, prediction.transpose((1, 2, 3, 0))])
+
+
+def main(project_dir, out_file, inference_config, key,
+         algorithm='cc', view_result=False):
     out = run_inference(project_dir, out_file, inference_config)
-    if algorithm == 'no':
+
+    if view_result:
+        view_res(out)
+
+    if algorithm in ('no', ''):
         return
+
     score = evaluate(out, algorithm)
     if algorithm != 'cc':
         key += '_' + algorithm
@@ -139,6 +153,11 @@ def main(project_dir, out_file, inference_config, key, algorithm='cc'):
         json.dump(results, f, sort_keys=True, indent=4)
 
 
+def set_device(device):
+    print("Setting cuda devices to", device)
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(device)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('project_directory', type=str)
@@ -146,5 +165,10 @@ if __name__ == '__main__':
     parser.add_argument('--out_file', type=str, default='')
     parser.add_argument('--inference_config', type=str, default='template_config/inf_config.yml')
     parser.add_argument('--algorithm', type=str, default='cc')
+    parser.add_argument('--view_result', type=int, default=0)
+    parser.add_argument('--device', type=int, default=0)
     args = parser.parse_args()
-    main(args.project_directory, args.out_file, args.inference_config, args.result_key, args.algorithm)
+    if args.device != 0:
+        set_device(args.device)
+    main(args.project_directory, args.out_file, args.inference_config, args.result_key, args.algorithm,
+         bool(args.view_result))
